@@ -1,0 +1,92 @@
+syntax = "v1"
+
+type (
+	User {
+		Id         int64  `json:"id"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		CreateTime string `json:"create_time"`
+	}
+	RegisterReq {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	RegisterResp {
+		Id   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+)
+
+type GetUserReq {
+	Id int64 `path:"id"` // 从 URL 路径获取 id
+}
+
+type GetUserResp {
+	Id    int64  `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// 分页查询请求
+type ListUsersReq {
+	Page     int64 `form:"page,default=1"` // 页码，默认第1页
+	PageSize int64 `form:"page_size,default=10"` // 每页数量，默认10条
+}
+
+// 分页查询响应
+type ListUsersResp {
+	List     []UserItem `json:"list"` // 用户列表
+	Total    int64      `json:"total"` // 总数
+	Page     int64      `json:"page"` // 当前页
+	PageSize int64      `json:"page_size"` // 每页数量
+}
+
+// 用户列表项
+type UserItem {
+	Id    int64  `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// 更新用户请求
+type UpdateUserReq {
+	Id    int64  `path:"id"` // 从 URL 路径获取用户 ID
+	Name  string `json:"name"` // 新的用户名
+	Email string `json:"email"` // 新的邮箱
+}
+
+// 更新用户响应
+type UpdateUserResp {
+	Message string `json:"message"` // 操作结果消息
+}
+
+// 删除用户请求
+type DeleteUserReq {
+	Id int64 `path:"id"` // 从 URL 路径获取用户 ID
+}
+
+// 删除用户响应
+type DeleteUserResp {
+	Message string `json:"message"` // 操作结果消息
+}
+
+@server (
+	prefix: /user
+)
+service user-api {
+	@handler RegisterHandler
+	post /register (RegisterReq) returns (RegisterResp)
+
+	@handler GetUserHandler
+	get /info/:id (GetUserReq) returns (GetUserResp) // 查询用户
+
+	@handler ListUsersHandler
+	get /list (ListUsersReq) returns (ListUsersResp) // 分页查询
+
+	@handler UpdateUserHandler
+	put /:id (UpdateUserReq) returns (UpdateUserResp) // 更新用户
+
+	@handler DeleteUserHandler
+	delete /:id (DeleteUserReq) returns (DeleteUserResp) // 删除用户
+}
+
