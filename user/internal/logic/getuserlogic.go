@@ -30,14 +30,14 @@ func (l *GetUserLogic) GetUser(req *types.GetUserReq) (resp *types.GetUserResp, 
 	// todo: add your logic here and delete this line
 
 	user, err := l.svcCtx.UserModel.FindOne(l.ctx, req.Id)
-    if err != nil {
-        return nil, err
-    }
+	if err != nil {
+		return nil, err
+	}
 
-    // 2. 组装返回数据
-    return &types.GetUserResp{
-        Id:    user.Id,
-        Name:  user.Name,
-        Email: user.Email,
-    }, nil
+	// 2. 组装返回数据
+	return &types.GetUserResp{
+		Id:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+	}, nil
 }

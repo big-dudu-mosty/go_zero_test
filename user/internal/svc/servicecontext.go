@@ -1,11 +1,12 @@
 package svc
 
 import (
+	"log"
 	"user-demo/user/internal/config"
 	"user-demo/user/model"
 
-	"github.com/zeromicro/go-zero/core/stores/sqlx"
-	_ "github.com/lib/pq" // PostgreSQL driver
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // ServiceContext 服务上下文
@@ -24,15 +25,18 @@ type ServiceContext struct {
 //   - *ServiceContext: 初始化好的服务上下文
 //
 // 该函数负责:
-// 1. 根据配置创建 PostgreSQL 数据库连接
+// 1. 根据配置创建 GORM 数据库连接
 // 2. 初始化各个 Model 实例
 // 3. 组装并返回 ServiceContext
 func NewServiceContext(c config.Config) *ServiceContext {
-	// 使用配置中的连接字符串创建 PostgreSQL 连接
-	conn := sqlx.NewSqlConn("postgres", c.Postgres.DataSource)
+	// 使用 GORM 创建 PostgreSQL 连接
+	db, err := gorm.Open(postgres.Open(c.Postgres.DataSource), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
 
 	return &ServiceContext{
 		Config:    c,
-		UserModel: model.NewUserModel(conn), // 初始化 UserModel
+		UserModel: model.NewUserModel(db), // 初始化 UserModel
 	}
 }

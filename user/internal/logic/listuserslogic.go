@@ -57,7 +57,7 @@ func (l *ListUsersLogic) ListUsers(req *types.ListUsersReq) (resp *types.ListUse
 	list := make([]types.UserItem, 0, len(users))
 	for _, u := range users {
 		list = append(list, types.UserItem{
-			Id:    u.Id,
+			Id:    u.ID,
 			Name:  u.Name,
 			Email: u.Email,
 		})

@@ -1,9 +1,7 @@
 package model
 
 import (
-	"context"
-
-	"github.com/zeromicro/go-zero/core/stores/sqlx"
+	"gorm.io/gorm"
 )
 
 var _ UserModel = (*customUserModel)(nil)
@@ -13,8 +11,6 @@ type (
 	// and implement the added methods in customUserModel.
 	UserModel interface {
 		userModel
-		withSession(session sqlx.Session) UserModel
-		List(ctx context.Context, offset, limit int64) ([]*User, int64, error)
 	}
 
 	customUserModel struct {
@@ -23,12 +19,8 @@ type (
 )
 
 // NewUserModel returns a model for the database table.
-func NewUserModel(conn sqlx.SqlConn) UserModel {
+func NewUserModel(db *gorm.DB) UserModel {
 	return &customUserModel{
-		defaultUserModel: newUserModel(conn),
+		defaultUserModel: newUserModel(db),
 	}
-}
-
-func (m *customUserModel) withSession(session sqlx.Session) UserModel {
-	return NewUserModel(sqlx.NewSqlConnFromSession(session))
 }
