@@ -2,7 +2,10 @@ module user-demo
 
 go 1.25.2
 
-require github.com/zeromicro/go-zero v1.9.3
+require (
+	github.com/lib/pq v1.10.9
+	github.com/zeromicro/go-zero v1.9.3
+)
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
