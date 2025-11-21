@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "./user";
+
+// 创建用户
+message CreateUserReq {
+    string name = 1;
+    string email = 2;
+}
+
+message CreateUserResp {
+    int64 id = 1;
+}
+
+// 获取用户详情
+message GetUserReq {
+    int64 id = 1;
+}
+
+message GetUserResp {
+    int64 id = 1;
+    string name = 2;
+    string email = 3;
+    int64 age = 4;
+}
+
+// 更新用户
+message UpdateUserReq {
+    int64 id = 1;
+    string name = 2;
+    string email = 3;
+}
+
+message UpdateUserResp {
+    string message = 1;
+}
+
+// 删除用户
+message DeleteUserReq {
+    int64 id = 1;
+}
+
+message DeleteUserResp {
+    string message = 1;
+}
+
+// 用户列表（分页）
+message ListUsersReq {
+    int64 page = 1;
+    int64 page_size = 2;
+}
+
+message UserItem {
+    int64 id = 1;
+    string name = 2;
+    string email = 3;
+}
+
+message ListUsersResp {
+    repeated UserItem list = 1;
+    int64 total = 2;
+    int64 page = 3;
+    int64 page_size = 4;
+}
+
+// RPC 服务定义
+service User {
+    rpc CreateUser(CreateUserReq) returns (CreateUserResp);
+    rpc GetUser(GetUserReq) returns (GetUserResp);
+    rpc UpdateUser(UpdateUserReq) returns (UpdateUserResp);
+    rpc DeleteUser(DeleteUserReq) returns (DeleteUserResp);
+    rpc ListUsers(ListUsersReq) returns (ListUsersResp);
+}

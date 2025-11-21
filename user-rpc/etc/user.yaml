@@ -1,0 +1,5 @@
+Name: user.rpc
+ListenOn: 0.0.0.0:8080
+
+Postgres:
+  DataSource: postgres://admin:1234@127.0.0.1:5432/dex_db?sslmode=disable

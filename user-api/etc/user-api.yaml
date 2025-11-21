@@ -1,0 +1,8 @@
+Name: user-api
+Host: 0.0.0.0
+Port: 8888
+
+# RPC 客户端配置（直连模式，无需 etcd）
+UserRpc:
+  Endpoints:
+  - 127.0.0.1:8080
