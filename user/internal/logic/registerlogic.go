@@ -36,19 +36,13 @@ func (l *RegisterLogic) Register(req *types.RegisterReq) (resp *types.RegisterRe
 		Email: req.Email,
 	}
 
-	// 2. 插入数据库
-	result, err := l.svcCtx.UserModel.Insert(l.ctx, user)
+	// 2. 插入数据库（PostgreSQL 使用 RETURNING id 直接返回新增 ID）
+	id, err := l.svcCtx.UserModel.Insert(l.ctx, user)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. 拿到新增 ID
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	// 4. 返回响应
+	// 3. 返回响应
 	return &types.RegisterResp{
 		Id:   id,
 		Name: req.Name,

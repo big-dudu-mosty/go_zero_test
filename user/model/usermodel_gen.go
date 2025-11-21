@@ -6,7 +6,6 @@ package model
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -17,15 +16,15 @@ import (
 )
 
 var (
-	userFieldNames          = builder.RawFieldNames(&User{})
+	userFieldNames          = builder.RawFieldNames(&User{}, true)
 	userRows                = strings.Join(userFieldNames, ",")
-	userRowsExpectAutoSet   = strings.Join(stringx.Remove(userFieldNames, "`id`", "`create_at`", "`create_time`", "`created_at`", "`update_at`", "`update_time`", "`updated_at`"), ",")
-	userRowsWithPlaceHolder = strings.Join(stringx.Remove(userFieldNames, "`id`", "`create_at`", "`create_time`", "`created_at`", "`update_at`", "`update_time`", "`updated_at`"), "=?,") + "=?"
+	userRowsExpectAutoSet   = strings.Join(stringx.Remove(userFieldNames, "id", "create_at", "create_time", "created_at", "update_at", "update_time", "updated_at"), ",")
+	userRowsWithPlaceHolder = builder.PostgreSqlJoin(stringx.Remove(userFieldNames, "id", "create_at", "create_time", "created_at", "update_at", "update_time", "updated_at"))
 )
 
 type (
 	userModel interface {
-		Insert(ctx context.Context, data *User) (sql.Result, error)
+		Insert(ctx context.Context, data *User) (int64, error)
 		FindOne(ctx context.Context, id int64) (*User, error)
 		FindOneByEmail(ctx context.Context, email string) (*User, error)
 		Update(ctx context.Context, data *User) error
@@ -51,18 +50,18 @@ type (
 func newUserModel(conn sqlx.SqlConn) *defaultUserModel {
 	return &defaultUserModel{
 		conn:  conn,
-		table: "`user`",
+		table: `"public"."user"`,
 	}
 }
 
 func (m *defaultUserModel) Delete(ctx context.Context, id int64) error {
-	query := fmt.Sprintf("delete from %s where `id` = ?", m.table)
+	query := fmt.Sprintf("delete from %s where id = $1", m.table)
 	_, err := m.conn.ExecCtx(ctx, query, id)
 	return err
 }
 
 func (m *defaultUserModel) FindOne(ctx context.Context, id int64) (*User, error) {
-	query := fmt.Sprintf("select %s from %s where `id` = ? limit 1", userRows, m.table)
+	query := fmt.Sprintf("select %s from %s where id = $1 limit 1", userRows, m.table)
 	var resp User
 	err := m.conn.QueryRowCtx(ctx, &resp, query, id)
 	switch err {
@@ -77,7 +76,7 @@ func (m *defaultUserModel) FindOne(ctx context.Context, id int64) (*User, error)
 
 func (m *defaultUserModel) FindOneByEmail(ctx context.Context, email string) (*User, error) {
 	var resp User
-	query := fmt.Sprintf("select %s from %s where `email` = ? limit 1", userRows, m.table)
+	query := fmt.Sprintf("select %s from %s where email = $1 limit 1", userRows, m.table)
 	err := m.conn.QueryRowCtx(ctx, &resp, query, email)
 	switch err {
 	case nil:
@@ -89,15 +88,16 @@ func (m *defaultUserModel) FindOneByEmail(ctx context.Context, email string) (*U
 	}
 }
 
-func (m *defaultUserModel) Insert(ctx context.Context, data *User) (sql.Result, error) {
-	query := fmt.Sprintf("insert into %s (%s) values (?, ?, ?)", m.table, userRowsExpectAutoSet)
-	ret, err := m.conn.ExecCtx(ctx, query, data.Name, data.Email, data.Age)
-	return ret, err
+func (m *defaultUserModel) Insert(ctx context.Context, data *User) (int64, error) {
+	query := fmt.Sprintf("insert into %s (%s) values ($1, $2, $3) RETURNING id", m.table, userRowsExpectAutoSet)
+	var id int64
+	err := m.conn.QueryRowCtx(ctx, &id, query, data.Name, data.Email, data.Age)
+	return id, err
 }
 
 func (m *defaultUserModel) Update(ctx context.Context, newData *User) error {
-	query := fmt.Sprintf("update %s set %s where `id` = ?", m.table, userRowsWithPlaceHolder)
-	_, err := m.conn.ExecCtx(ctx, query, newData.Name, newData.Email, newData.Age, newData.Id)
+	query := fmt.Sprintf("update %s set %s where id = $1", m.table, userRowsWithPlaceHolder)
+	_, err := m.conn.ExecCtx(ctx, query, newData.Id, newData.Name, newData.Email, newData.Age)
 	return err
 }
 
@@ -105,8 +105,9 @@ func (m *defaultUserModel) tableName() string {
 	return m.table
 }
 
-func (m *defaultUserModel) List(ctx context.Context, offset, limit int64) ([]*User, int64, error) {
-	query := "select id, name, email, age, created_at, updated_at from user limit ? offset ?"
+// List 分页查询用户列表
+func (m *customUserModel) List(ctx context.Context, offset, limit int64) ([]*User, int64, error) {
+	query := fmt.Sprintf("select %s from %s limit $1 offset $2", userRows, m.table)
 	var resp []*User
 
 	err := m.conn.QueryRowsCtx(ctx, &resp, query, limit, offset)
@@ -115,7 +116,7 @@ func (m *defaultUserModel) List(ctx context.Context, offset, limit int64) ([]*Us
 	}
 
 	// count total
-	countQuery := "select count(*) from user"
+	countQuery := fmt.Sprintf("select count(*) from %s", m.table)
 	var total int64
 	err = m.conn.QueryRowCtx(ctx, &total, countQuery)
 	if err != nil {

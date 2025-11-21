@@ -5,6 +5,7 @@ import (
 	"user-demo/user/model"
 
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
+	_ "github.com/lib/pq" // PostgreSQL driver
 )
 
 // ServiceContext 服务上下文
@@ -23,12 +24,12 @@ type ServiceContext struct {
 //   - *ServiceContext: 初始化好的服务上下文
 //
 // 该函数负责:
-// 1. 根据配置创建 MySQL 数据库连接
+// 1. 根据配置创建 PostgreSQL 数据库连接
 // 2. 初始化各个 Model 实例
 // 3. 组装并返回 ServiceContext
 func NewServiceContext(c config.Config) *ServiceContext {
-	// 使用配置中的连接字符串创建 MySQL 连接
-	conn := sqlx.NewMysql(c.Mysql.DataSource)
+	// 使用配置中的连接字符串创建 PostgreSQL 连接
+	conn := sqlx.NewSqlConn("postgres", c.Postgres.DataSource)
 
 	return &ServiceContext{
 		Config:    c,

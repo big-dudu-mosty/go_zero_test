@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+
 	"github.com/zeromicro/go-zero/core/stores/sqlx"
 )
 
@@ -12,6 +14,7 @@ type (
 	UserModel interface {
 		userModel
 		withSession(session sqlx.Session) UserModel
+		List(ctx context.Context, offset, limit int64) ([]*User, int64, error)
 	}
 
 	customUserModel struct {
