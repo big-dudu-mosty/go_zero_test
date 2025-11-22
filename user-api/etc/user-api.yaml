@@ -2,7 +2,7 @@ Name: user-api
 Host: 0.0.0.0
 Port: 8888
 
-# RPC 客户端配置（直连模式，无需 etcd）
+# RPC 客户端配置（通过宿主机端口访问）
 UserRpc:
   Endpoints:
-  - 127.0.0.1:8080
+  - host.docker.internal:8080

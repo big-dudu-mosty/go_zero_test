@@ -1,0 +1,30 @@
+services:
+  # ==================== user-rpc 服务 ====================
+  user-rpc:
+    build:
+      context: .
+      dockerfile: user-rpc/Dockerfile
+    container_name: user-rpc
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ==================== user-api 服务 ====================
+  user-api:
+    build:
+      context: .
+      dockerfile: user-api/Dockerfile
+    container_name: user-api
+    ports:
+      - "8888:8888"
+    depends_on:
+      - user-rpc
+    environment:
+      - TZ=Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

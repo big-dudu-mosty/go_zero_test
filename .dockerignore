@@ -1,0 +1,50 @@
+# Git 相关
+.git
+.gitignore
+.gitattributes
+
+# 文档
+README.md
+*.md
+claude.md
+
+# 脚本
+start-services.sh
+stop-services.sh
+
+# Docker 相关
+docker-compose.yaml
+Dockerfile
+.dockerignore
+
+# 编译产物
+user-api/user-api
+user-rpc/user-rpc
+*.exe
+*.test
+*.out
+
+# 依赖目录
+vendor/
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+.DS_Store
+
+# 图片（如果不需要）
+*.png
+*.jpg
+*.jpeg
+*.gif
