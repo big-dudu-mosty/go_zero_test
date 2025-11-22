@@ -1,10 +1,8 @@
-# Go-Zero 用户管理系统 - 学习笔记
+# User Demo - go-zero 微服务学习项目
 
-一个完整的 go-zero 入门项目，通过用户管理系统学习 go-zero 框架的核心概念、分层架构和开发流程。
+这是一个基于 go-zero 框架的用户管理系统，用于学习微服务架构。项目经历了三个重要阶段的演进，每个阶段都解决了实际开发中会遇到的问题。
 
----
-
-## 📚 项目简介
+## 项目简介
 
 本项目实现了用户管理的完整 CRUD 功能：
 - 用户注册
@@ -13,524 +11,669 @@
 - 更新用户
 - 删除用户
 
-**学习目标**：理解 go-zero 的分层架构、数据流动、代码生成工具的使用。
+**核心价值**：通过实际操作理解微服务拆分的本质，解答"为什么要拆分"、"怎么拆分"、"拆分后如何通信"等关键问题。
 
 ---
 
-## 🏗️ 核心架构理解
+## 架构演进历程
 
-### 1. go-zero 的分层设计
+### 阶段一：MySQL + sqlx 单体应用（master 分支）
 
-go-zero 将应用分为三个核心层次，每层职责明确：
-
+**架构图：**
 ```
-┌─────────────────────────────────┐
-│  API 层 (user.api)              │  → 定义接口规范（对外的合同）
-└─────────────────────────────────┘
-            ↓
-┌─────────────────────────────────┐
-│  Handler 层                      │  → HTTP 请求处理（解析参数、返回响应）
-└─────────────────────────────────┘
-            ↓
-┌─────────────────────────────────┐
-│  Logic 层                        │  → 业务逻辑（参数校验、流程控制）
-└─────────────────────────────────┘
-            ↓
-┌─────────────────────────────────┐
-│  Model 层                        │  → 数据库操作（SQL 封装）
-└─────────────────────────────────┘
-            ↓
-┌─────────────────────────────────┐
-│  数据库 (MySQL)                  │  → 数据存储
-└─────────────────────────────────┘
+外部请求 → API Handler → Logic → Model (sqlx) → MySQL
 ```
 
-**关键原则**：每一层只关心自己的事，通过接口与其他层交互。
+**特点：**
+- 所有功能在一个服务中
+- Logic 直接调用 Model 操作数据库
+- 简单直接，适合小型项目
+
+### 阶段二：PostgreSQL + GORM 单体应用（postgres 分支）
+
+**架构图：**
+```
+外部请求 → API Handler → Logic → Model (GORM) → PostgreSQL
+```
+
+**改动：**
+- 数据库从 MySQL 切换到 PostgreSQL
+- ORM 从 sqlx 切换到 GORM
+
+**遇到的问题：**
+- PostgreSQL 不支持 `LastInsertId()`，需要用 `RETURNING id`
+- SQL 占位符从 `?` 改为 `$1, $2, $3`
+- GORM 的用法与 sqlx 完全不同
+
+**核心理解：** 不同数据库和 ORM 有不同的特性，但架构模式不变。
+
+### 阶段三：微服务拆分（当前）
+
+**架构图：**
+```
+外部请求 → user-api (HTTP Gateway)
+              ↓ (gRPC 调用)
+          user-rpc (业务服务)
+              ↓
+          PostgreSQL
+```
+
+**改动：**
+- 新增 user-rpc：专门处理业务逻辑和数据库
+- user 改名为 user-api：只负责接收 HTTP 请求
+- API Logic 不再直接调用 Model，改为调用 RPC
+
+**核心理解：** 这就是"多包了一层"，Logic 通过网络调用另一个服务，而不是直接调用本地方法。
 
 ---
 
-### 2. 数据流动逻辑
-
-以"查询用户列表"为例，理解数据如何在各层之间流动：
-
-**用户请求**：
-```
-GET /user/list?page=1&page_size=10
-```
-
-**数据流动过程**：
-
-1. **API 定义阶段**（开发前）
-   - 在 `.api` 文件中定义接口的"样子"
-   - 告诉系统：这个接口接收什么参数、返回什么数据
-
-2. **Handler 层**（请求进来）
-   - 接收 HTTP 请求
-   - 解析查询参数：`page=1`, `page_size=10`
-   - 把参数封装成 Go 结构体
-   - 调用 Logic 层
-
-3. **Logic 层**（业务处理）
-   - 接收参数结构体
-   - 参数校验（page 不能小于 1）
-   - 计算偏移量：`offset = (page - 1) * page_size`
-   - 调用 Model 层查询数据
-   - 把 Model 返回的数据转换成 API 响应格式
-   - 返回给 Handler
-
-4. **Model 层**（数据库操作）
-   - 接收 offset 和 limit
-   - 执行 SQL：`SELECT * FROM user LIMIT 10 OFFSET 0`
-   - 查询总数：`SELECT COUNT(*) FROM user`
-   - 把数据库记录映射成 Go 结构体
-   - 返回给 Logic
-
-5. **Handler 层**（返回响应）
-   - 接收 Logic 返回的数据
-   - 序列化成 JSON
-   - 返回给客户端
-
-**返回数据**：
-```json
-{
-  "list": [...],
-  "total": 25,
-  "page": 1,
-  "page_size": 10
-}
-```
-
----
-
-## 🔑 核心概念详解
-
-### API 文件的作用
-
-**API 文件 = 接口的说明书**
-
-定义三件事：
-1. **接口地址**：这个功能的 URL 是什么
-2. **请求参数**：外部需要传什么数据
-3. **返回数据**：外部会得到什么数据
-
-**重要理解**：
-- API 字段 ≠ 数据库字段
-- API 是给外部看的，数据库是内部存储
-- 通过 Logic 层进行转换和映射
-
-示例：
-- API 可能只要求用户传 `name` 和 `email`
-- 但数据库会自动添加 `id`、`created_at`、`updated_at`
-- Logic 层负责补充这些字段
-
----
-
-### Model 层的两个文件
-
-项目中有两个 Model 文件，分工明确：
-
-**1. `usermodel_gen.go`（自动生成，不要改）**
-- goctl 根据数据库表自动生成
-- 包含基础的 CRUD 方法
-- 封装了所有 SQL 操作
-- 每次运行 goctl 会重新生成
-
-**2. `usermodel.go`（可以编辑）**
-- 用来添加自定义方法
-- 比如复杂的查询、业务相关的数据操作
-- 不会被 goctl 覆盖
-
-**为什么分两个文件？**
-- 保护你的自定义代码不被覆盖
-- 基础功能自动生成，省去重复劳动
-- 扩展功能手动添加，保持灵活性
-
----
-
-### 字段映射的三层关系
-
-**Go 字段名 ↔ Tag ↔ 外部名称**
-
-```
-类型定义：
-type User struct {
-    PageSize int64 `form:"page_size"`
-}
-
-三层含义：
-1. Go 代码中：req.PageSize（大驼峰，代码中用）
-2. Tag 标记：form:"page_size"（蛇形，映射规则）
-3. URL 参数：?page_size=10（蛇形，外部传递）
-```
-
-**不同场景的 Tag**：
-- `form` → 查询参数（`?page=1`）
-- `path` → 路径参数（`/user/:id`）
-- `json` → JSON 请求体（`{"name": "xxx"}`）
-- `db` → 数据库字段（`user.name` 列）
-
-**关键点**：
-- Go 字段名必须大写（才能被外部访问）
-- Tag 可以定义外部的命名格式
-- 数据库字段通过 `db` tag 映射
-
----
-
-## 🛠️ 开发流程
-
-### 添加新功能的标准流程
-
-以"添加分页功能"为例：
-
-**步骤 1：设计接口**（思考）
-- 接口地址：`GET /user/list`
-- 需要什么参数：`page`, `page_size`
-- 返回什么数据：用户列表、总数、页码
-
-**步骤 2：修改 API 文件**（定义）
-- 定义请求结构：`ListUsersReq`
-- 定义响应结构：`ListUsersResp`
-- 定义路由：`get /list`
-
-**步骤 3：运行 goctl**（生成代码）
-```bash
-goctl api go -api user.api -dir .
-```
-- 自动生成 Handler
-- 自动生成 Logic 框架
-- 自动生成 Types
-- 自动注册路由
-
-**步骤 4：实现 Model 方法**（如果需要）
-- 在 `usermodel.go` 中添加分页查询方法
-- 封装 SQL：`LIMIT` 和 `OFFSET`
-
-**步骤 5：实现 Logic 业务逻辑**（核心）
-- 参数校验
-- 调用 Model 查询
-- 数据转换
-- 返回响应
-
-**步骤 6：测试**（验证）
-- 启动服务
-- 使用 Apifox 测试
-- 检查日志
-- 验证数据
-
----
-
-## ⚠️ 常见问题与解决
-
-### 问题 1：400 错误 - 字段小写导致无法解析
-
-**现象**：
-```
-[HTTP] 400 - POST /user/register
-```
-
-**原因**：
-API 文件中字段是小写：
-```
-type RegisterReq {
-    name string   // ❌ 小写，JSON 无法解析
-}
-```
-
-**解决**：
-字段必须大写，用 tag 指定 JSON 名称：
-```
-type RegisterReq {
-    Name string `json:"name"`  // ✅ 正确
-}
-```
-
-**理解**：Go 语言中，小写字段是私有的，外部无法访问。
-
----
-
-### 问题 2：SQL 查询字段不匹配
-
-**现象**：
-```
-查询数据库失败: not matching destination to scan
-```
-
-**原因**：
-SQL 查询的字段少于结构体字段：
-```
-SQL: select id, name, email from user
-结构体: User { Id, Name, Email, Age, CreatedAt, UpdatedAt }
-```
-
-**解决**：
-SQL 必须查询所有字段：
-```
-SQL: select id, name, email, age, created_at, updated_at from user
-```
-
-**理解**：go-zero 需要把 SQL 结果映射到结构体，字段必须一一对应。
-
----
-
-### 问题 3：404 错误 - 路由不匹配
-
-**现象**：
-```
-[HTTP] 404 - PUT /user/update/1
-```
-
-**原因**：
-URL 路径错误，多加了 `update`：
-```
-API 定义: put /:id
-正确 URL: PUT /user/1
-错误 URL: PUT /user/update/1
-```
-
-**解决**：
-直接使用 `/user/:id`，不要加多余的路径。
-
-**理解**：RESTful 风格，用 HTTP 方法区分操作，而不是路径。
-
----
-
-### 问题 4：修改代码后还是报错
-
-**现象**：
-修改了代码，但测试时还是旧的错误。
-
-**原因**：
-服务没有重启，还在运行旧代码。
-
-**解决**：
-每次修改代码后，必须重启服务：
-1. 按 `Ctrl+C` 停止服务
-2. 重新运行 `go run user.go -f etc/user-api.yaml`
-
-**理解**：Go 是编译型语言，代码修改后需要重新运行。
-
----
-
-### 问题 5：数据库表字段和代码不一致
-
-**现象**：
-```
-Error: Unknown column 'created_at' in 'field list'
-```
-
-**原因**：
-- 代码中有 `created_at` 字段
-- 但数据库表中没有这个列
-
-**解决方案**：
-1. 重新建表（最干净）
-2. 或者修改表添加缺失字段
-
-**最佳实践**：
-- 先写 SQL 文件定义表结构
-- 执行 SQL 创建表
-- 用 goctl 从数据库生成 Model
-- 这样保证代码和数据库 100% 一致
-
----
-
-## 💡 核心学习要点
-
-### 1. 分层的意义
-
-**为什么要分层？**
-- **职责分离**：每层只做自己的事
-- **易于维护**：改数据库不影响业务逻辑
-- **便于测试**：可以单独测试每一层
-- **代码复用**：Model 方法可以被多个 Logic 调用
-
-### 2. 代码生成的价值
-
-**goctl 生成了什么？**
-- 重复的框架代码（HTTP 解析、路由注册）
-- 标准的项目结构
-- 类型定义
-
-**你需要做什么？**
-- 填充业务逻辑（Logic 层）
-- 添加自定义查询（Model 层）
-- 设计接口规范（API 文件）
-
-### 3. API 设计思维
-
-**API 是对外的承诺**：
-- 一旦发布，不能随意改动
-- 要考虑扩展性（分页、筛选、排序）
-- 要考虑安全性（不要暴露敏感字段）
-
-**内部实现可以随便改**：
-- Model 的 SQL 怎么写
-- Logic 的业务逻辑怎么处理
-- 只要 API 不变，外部无感知
-
-### 4. 数据库管理
-
-**学习阶段**：手动建表
-**真实项目**：使用数据库迁移工具（golang-migrate）
-
-**为什么？**
-- 版本控制（每次变更都有记录）
-- 可回滚（出问题可以退回）
-- 团队协作（所有人执行同样的脚本）
-
----
-
-## 🚀 快速开始
-
-### 1. 环境准备
-- Go 1.16+
-- MySQL 5.7+
-- goctl 工具
-
-### 2. 数据库初始化
-
-创建数据库：
-```sql
-CREATE DATABASE userdb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-```
-
-导入表结构（`user.sql`）：
-```sql
-USE userdb;
-
-CREATE TABLE `user` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '用户ID',
-  `name` varchar(255) NOT NULL DEFAULT '' COMMENT '用户姓名',
-  `email` varchar(255) NOT NULL DEFAULT '' COMMENT '用户邮箱',
-  `age` int NOT NULL DEFAULT 0 COMMENT '用户年龄',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_email` (`email`),
-  KEY `idx_name` (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
-```
-
-### 3. 配置修改
-
-修改 `user/etc/user-api.yaml` 中的数据库连接信息：
-```yaml
-Mysql:
-  DataSource: root:你的密码@tcp(127.0.0.1:3306)/userdb?charset=utf8mb4&parseTime=true&loc=Local
-```
-
-### 4. 启动服务
-```bash
-cd user
-go run user.go -f etc/user-api.yaml
-```
-
-### 5. 测试接口
-
-服务启动后访问 `http://localhost:8888`
-
----
-
-## 📡 API 文档
-
-| 功能 | 方法 | 路径 | 说明 |
-|------|------|------|------|
-| 注册用户 | POST | `/user/register` | Body: `{"name": "张三", "email": "test@example.com"}` |
-| 查询用户 | GET | `/user/info/:id` | 路径参数: `id`（如 `/user/info/1`） |
-| 用户列表 | GET | `/user/list` | Query: `?page=1&page_size=10` |
-| 更新用户 | PUT | `/user/:id` | 路径参数: `id` + Body: `{"name": "新名字", "email": "new@example.com"}` |
-| 删除用户 | DELETE | `/user/:id` | 路径参数: `id`（如 `/user/1`） |
-
-### 请求示例
-
-**注册用户**：
-```bash
-curl -X POST http://localhost:8888/user/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"张三","email":"zhangsan@example.com"}'
-```
-
-**查询用户**：
-```bash
-curl http://localhost:8888/user/info/1
-```
-
-**用户列表（分页）**：
-```bash
-curl http://localhost:8888/user/list?page=1&page_size=10
-```
-
-**更新用户**：
-```bash
-curl -X PUT http://localhost:8888/user/1 \
-  -H "Content-Type: application/json" \
-  -d '{"name":"李四","email":"lisi@example.com"}'
-```
-
-**删除用户**：
-```bash
-curl -X DELETE http://localhost:8888/user/1
-```
-
----
-
-## 📂 项目结构
+## 目录结构
 
 ```
 user-demo/
-├── user/                    # 用户服务
-│   ├── user.api            # API 定义文件
-│   ├── user.go             # 服务入口
-│   ├── etc/                # 配置文件
-│   │   └── user-api.yaml
-│   ├── internal/           # 内部代码
-│   │   ├── config/         # 配置结构
-│   │   ├── handler/        # HTTP 处理器
-│   │   ├── logic/          # 业务逻辑
-│   │   ├── svc/            # 服务上下文
-│   │   └── types/          # 类型定义
-│   └── model/              # 数据模型
-│       ├── usermodel.go         # 自定义方法
-│       └── usermodel_gen.go     # 自动生成
-└── user.sql                # 数据库建表脚本
+├── go.mod                 # 统一的 Go 模块管理（重要！）
+├── start-services.sh      # 一键启动脚本
+├── stop-services.sh       # 一键停止脚本
+│
+├── user-api/              # API 网关（端口 8888）
+│   ├── etc/user-api.yaml  # 配置：包含 RPC 连接地址
+│   ├── internal/
+│   │   ├── handler/       # HTTP 请求处理
+│   │   ├── logic/         # 业务逻辑（调用 RPC，不直接访问数据库）
+│   │   └── svc/           # 服务上下文（持有 RPC 客户端）
+│   └── user.go            # 主入口
+│
+└── user-rpc/              # RPC 业务服务（端口 8080）
+    ├── etc/user.yaml      # 配置：包含数据库连接
+    ├── user.proto         # Protobuf 服务定义（手写）
+    ├── internal/
+    │   ├── logic/         # 业务逻辑（操作数据库）
+    │   ├── server/        # gRPC 服务器（自动生成）
+    │   └── svc/           # 服务上下文（持有数据库连接）
+    ├── model/             # 数据模型（从 user-api 复制过来的）
+    ├── user/              # Protobuf 生成的代码
+    ├── userclient/        # RPC 客户端代码（给 API 用）
+    └── user.go            # 主入口
+```
+
+**重要说明：**
+- 只有一个 `go.mod`（在根目录），两个服务共用
+- Model 代码完全一样，只是位置从 user-api 移到了 user-rpc
+- 90% 的 RPC 代码是自动生成的，你只需要填写业务逻辑
+
+---
+
+## 核心概念详解
+
+### 1. 什么是微服务拆分？
+
+**最简单的理解：把一个大服务拆成多个小服务。**
+
+**单体应用：**
+- 所有功能都在一起
+- Logic 直接调用 Model
+- 一个服务挂了，整个系统挂了
+
+**微服务：**
+- 功能分散在不同服务中
+- Logic 通过网络调用其他服务
+- 一个服务挂了，其他服务还能运行
+
+**本项目的拆分：**
+- **user-api**：只管接收 HTTP 请求，把请求转发给 RPC
+- **user-rpc**：只管业务逻辑和数据库操作
+
+### 2. Logic 为什么不直接调用 Model 了？
+
+这是很多人的困惑点！
+
+**之前（单体）：**
+```
+user-api Logic → 直接调用 Model.FindOne() → 数据库
+```
+这是**函数调用**，在同一个进程内。
+
+**现在（微服务）：**
+```
+user-api Logic → 通过网络调用 RPC → user-rpc Logic → Model.FindOne() → 数据库
+```
+这是**网络调用**，跨越两个进程。
+
+**关键理解：**
+- Model 代码没有变，还是那些方法
+- 只是 Model 不在 user-api 里了，搬到 user-rpc 里了
+- user-api 通过网络调用 user-rpc，user-rpc 再调用 Model
+
+**为什么要这样？**
+- 职责分离：API 只管接口，RPC 只管业务
+- 可扩展：可以启动多个 RPC 实例分担压力
+- 可维护：改业务逻辑只需重启 RPC，不影响 API
+
+### 3. "多包了一层"是什么意思？
+
+**之前：**
+```
+HTTP 请求 → API Logic → Model → 数据库
+```
+2 层：Logic 直接调 Model
+
+**现在：**
+```
+HTTP 请求 → API Logic → (网络调用) → RPC Logic → Model → 数据库
+```
+3 层：API Logic 先调 RPC Logic，RPC Logic 再调 Model
+
+**这一层带来了什么？**
+- ✅ 服务分离：可以独立部署
+- ✅ 负载均衡：可以多实例
+- ✅ 灵活扩展：改 RPC 不影响 API
+- ❌ 增加复杂度：多了网络通信
+- ❌ 性能损耗：网络调用比函数调用慢
+
+**何时需要拆分？**
+- 业务复杂，单体难以维护
+- 流量大，需要独立扩展某个服务
+- 团队大，多人协作需要拆分模块
+
+**何时不需要拆分？**
+- 小项目，几个接口而已
+- 流量小，单机足够
+- 团队小，维护成本高于收益
+
+### 4. RPC 调用和函数调用有什么区别？
+
+**函数调用（本地）：**
+```
+result := userModel.FindOne(ctx, id)
+```
+- 在同一个进程内
+- 速度快（纳秒级）
+- 不会失败（除非代码 bug）
+
+**RPC 调用（远程）：**
+```
+result := userRpc.GetUser(ctx, &req)
+```
+- 跨进程，通过网络
+- 速度慢（毫秒级）
+- 可能失败（网络问题、服务挂了）
+
+**虽然写法很像，但本质完全不同！**
+
+RPC 调用实际上做了这些事：
+1. 把请求参数序列化（变成字节流）
+2. 通过 TCP 发送到 RPC 服务器
+3. RPC 服务器解析请求
+4. 执行业务逻辑
+5. 把结果序列化
+6. 通过 TCP 返回
+7. 客户端解析结果
+
+### 5. Model 代码会变吗？
+
+**不会变！** 这是很重要的理解。
+
+Model 层的代码完全一样，只是：
+- **之前**：Model 在 `user/model/`，被 `user/logic/` 调用
+- **现在**：Model 在 `user-rpc/model/`，被 `user-rpc/logic/` 调用
+
+**本质：** Model 只是换了个调用者，从 API Logic 变成了 RPC Logic。
+
+### 6. RPC 代码是自动生成的吗？
+
+**90% 是自动生成的！**
+
+**你需要做的：**
+1. 编写 `user.proto` 文件（定义服务有哪些方法）
+2. 运行 `goctl` 命令生成代码
+3. 在 Logic 文件中填写业务逻辑（复制之前的代码）
+
+**自动生成的：**
+- gRPC Server 代码
+- gRPC Client 代码
+- Protobuf 消息定义
+- Handler 框架
+- 路由注册
+
+**手动填写的：**
+- Logic 中的业务逻辑（就是之前的代码）
+
+---
+
+## 服务发现：直连 vs etcd
+
+这是另一个重要概念！
+
+### 直连模式（本项目使用）
+
+**原理：** 在配置文件中直接写死 RPC 服务的地址。
+
+**配置示例：**
+```yaml
+# user-api/etc/user-api.yaml
+UserRpc:
+  Endpoints:
+  - 127.0.0.1:8080  # 直接写 RPC 的地址
+```
+
+**工作流程：**
+1. user-rpc 启动在 8080 端口
+2. user-api 读配置：RPC 在 127.0.0.1:8080
+3. user-api 直接连接这个地址
+
+**优点：**
+- 简单，无需额外组件
+- 适合学习和测试
+
+**缺点：**
+- RPC 地址必须固定
+- 不能随意更换机器
+- 不支持负载均衡
+
+**适用场景：**
+- 同一台机器上的服务
+- 固定 IP 的服务器
+- 单实例部署
+
+### etcd 服务发现模式
+
+**原理：** RPC 启动时自动注册到 etcd，API 从 etcd 查询 RPC 在哪里。
+
+**配置示例：**
+```yaml
+# user-rpc/etc/user.yaml
+Etcd:
+  Hosts:
+  - 192.168.1.10:2379  # etcd 地址
+  Key: user.rpc        # 服务名称
+
+# user-api/etc/user-api.yaml
+UserRpc:
+  Etcd:
+    Hosts:
+    - 192.168.1.10:2379  # etcd 地址
+    Key: user.rpc        # 要查询的服务名
+```
+
+**工作流程：**
+1. user-rpc 启动 → 告诉 etcd："我叫 user.rpc，我在 192.168.1.20:8080"
+2. etcd 记录：user.rpc = 192.168.1.20:8080
+3. user-rpc 定期发心跳：我还活着
+4. user-api 启动 → 问 etcd："user.rpc 在哪？"
+5. etcd 返回：192.168.1.20:8080
+6. user-api 连接到这个地址
+
+**优点：**
+- 动态服务发现（RPC 可以随便换机器）
+- 支持多实例负载均衡
+- 自动健康检查（RPC 挂了会自动摘除）
+- 适合生产环境
+
+**缺点：**
+- 需要部署 etcd
+- 配置相对复杂
+
+**适用场景：**
+- 生产环境
+- 多机部署
+- 需要高可用
+
+### API 和 RPC 可以在不同机器吗？
+
+**直连模式：** 可以，但需要修改配置中的 IP 地址。
+
+**etcd 模式：** 完全可以，这就是服务发现的威力！
+
+**举例（etcd 模式）：**
+- etcd 部署在广州（192.168.1.10）
+- user-rpc 部署在北京（192.168.1.20）
+- user-api 部署在上海（192.168.1.30）
+
+它们会自动找到彼此，无需手动配置 IP！
+
+**核心理解：**
+- 直连模式：你告诉 API："RPC 在 127.0.0.1:8080"
+- etcd 模式：API 问 etcd："user.rpc 在哪？"，etcd 自动告诉它
+
+---
+
+## 启动方式
+
+### 重要：必须先启动 RPC，再启动 API！
+
+**为什么？**
+
+因为 user-api 启动时会执行这段代码：
+```
+创建 RPC 客户端 → 尝试连接 127.0.0.1:8080
+```
+
+如果 RPC 还没启动：
+- ❌ 连接失败
+- ❌ API 启动可能报错或无法正常工作
+
+**正确顺序：**
+1. 先启动 user-rpc（监听 8080 端口）
+2. 再启动 user-api（连接到 8080 端口）
+
+### 方式一：一键启动（推荐）
+
+```bash
+cd /home/su/dome/go/go-zero-docs/test_demo/user-demo
+./start-services.sh
+```
+
+这个脚本会：
+1. 检查 PostgreSQL 是否运行
+2. 先启动 user-rpc
+3. 再启动 user-api
+4. 输出日志文件位置
+
+停止服务：
+```bash
+./stop-services.sh
+```
+
+### 方式二：手动启动（需要两个终端）
+
+**终端 1 - 启动 RPC：**
+```bash
+cd user-rpc
+go run user.go -f etc/user.yaml
+```
+
+看到这个表示成功：
+```
+Starting rpc server at 0.0.0.0:8080...
+```
+
+**终端 2 - 启动 API：**
+```bash
+cd user-api
+go run user.go -f etc/user-api.yaml
+```
+
+看到这个表示成功：
+```
+Starting server at 0.0.0.0:8888...
 ```
 
 ---
 
-## 📖 延伸学习
+## 如何测试
 
-**下一步可以学习**：
-1. RPC 服务开发（微服务间通信）
-2. 中间件使用（认证、日志、限流）
-3. 缓存集成（Redis）
-4. 服务发现（Etcd）
-5. 链路追踪（Jaeger）
+### 重要理解
 
-**推荐资源**：
-- go-zero 官方文档：https://go-zero.dev/
-- 官方示例项目：https://github.com/zeromicro/go-zero
+**你只需要测试 user-api（8888 端口）！**
+
+- ✅ 在 Apifox 中访问：`http://localhost:8888`
+- ❌ 不需要直接访问 user-rpc（8080 端口）
+
+**为什么？**
+
+因为 user-rpc 是"内部服务"，只供 user-api 调用，不对外暴露。
+
+**请求流程：**
+```
+Apifox 发送请求
+    ↓
+http://localhost:8888/user/list (user-api)
+    ↓
+user-api 内部通过 gRPC 调用 user-rpc
+    ↓
+127.0.0.1:8080 (user-rpc)
+    ↓
+user-rpc 查询数据库
+    ↓
+PostgreSQL
+    ↓
+原路返回数据
+    ↓
+Apifox 收到响应
+```
+
+**你在 Apifox 中感知不到 RPC 的存在！**
+
+### API 接口
+
+所有接口访问 `http://localhost:8888`：
+
+1. **创建用户** - POST `/user/register`
+2. **获取用户** - GET `/user/:id`
+3. **更新用户** - PUT `/user`
+4. **删除用户** - DELETE `/user/:id`
+5. **用户列表** - GET `/user/list`
+
+### 测试方式完全不变
+
+虽然后台变成了微服务架构，但对外接口完全一样！
+
+你在 Apifox 中的所有配置不需要改，继续用之前的就行。
 
 ---
 
-## 📝 总结
+## 常见问题（FAQ）
 
-通过本项目，你应该理解了：
-- ✅ go-zero 的分层架构和每层职责
-- ✅ API 文件的作用和字段映射
-- ✅ 数据在各层之间的流动逻辑
-- ✅ goctl 工具的使用和代码生成
-- ✅ 常见错误的排查思路
+### 1. 为什么有导入错误："package user-demo/user-rpc/xxx is not in std"？
 
-**核心思想**：
-- API 定义接口规范（对外）
-- Logic 实现业务逻辑（核心）
-- Model 封装数据操作（底层）
-- 分层解耦，职责清晰
+**原因：** user-rpc 最初有独立的 go.mod，模块名设置错了。
 
-这就是现代 Web 开发的标准实践！🎉
+**解决：** 删除了 user-rpc 的独立 go.mod，使用项目根目录的统一 go.mod。
+
+**理解：** 整个 user-demo 是一个 Go 模块，user-rpc 和 user-api 都是这个模块下的子目录，不需要各自的 go.mod。
+
+### 2. 为什么必须先启动 RPC 再启动 API？
+
+**原因：** API 启动时会立即尝试连接 RPC。
+
+**类比：**
+- RPC 是服务员
+- API 是前台
+- 前台上班时要确认服务员在岗，否则无法接待客人
+
+**如果先启动 API：**
+```
+API：我要连接 RPC...
+RPC：（还没启动）
+API：连接失败！报错或无法正常工作
+```
+
+### 3. API 和 RPC 能在不同机器上运行吗？
+
+**直连模式：** 可以，但要改配置中的 IP。
+
+例如 RPC 在 192.168.1.20：
+```yaml
+UserRpc:
+  Endpoints:
+  - 192.168.1.20:8080  # 改成实际 IP
+```
+
+**etcd 模式：** 完全可以，不需要改配置！
+
+只要所有服务都能连接到同一个 etcd，它们会自动互相发现，无论在哪台机器上。
+
+### 4. 为什么要用 RPC 而不是直接调用 Model？
+
+**核心原因：服务分离！**
+
+**好处：**
+- 职责清晰：API 管接口，RPC 管业务
+- 独立部署：改业务逻辑只需重启 RPC
+- 独立扩展：流量大就多开几个 RPC 实例
+- 技术选型：RPC 可以用 Go，API 也可以用其他语言
+
+**代价：**
+- 多了网络通信开销
+- 配置更复杂
+- 运维成本增加
+
+**什么时候拆分？**
+- 业务复杂，代码太多
+- 流量大，单机扛不住
+- 团队大，需要分工
+
+**什么时候不拆？**
+- 小项目，简单的 CRUD
+- 流量小，单机够用
+- 团队小，维护成本高
+
+### 5. 直连和 etcd 哪个更好？
+
+**学习阶段：** 用直连，简单快速上手。
+
+**生产环境：** 必须用 etcd 或类似的服务发现方案。
+
+**原因：**
+- 生产环境需要高可用（一个实例挂了，自动切换到其他实例）
+- 需要负载均衡（多个实例分担流量）
+- 需要动态扩缩容（流量大就加机器，流量小就减机器）
+
+### 6. 90% 的代码是自动生成的，我要写什么？
+
+**自动生成的：**
+- gRPC Server 和 Client 代码
+- Protobuf 消息定义
+- HTTP Handler 框架
+- 路由注册
+
+**你要写的：**
+- `user.proto`：定义服务有哪些方法
+- Logic 业务逻辑：就是把之前 API Logic 的代码复制过来
+- 配置文件：数据库连接、RPC 地址等
+
+**理解：** 框架帮你搭好架子，你只需要填充业务逻辑。
+
+### 7. 端口被占用怎么办？
+
+**查看占用情况：**
+```bash
+lsof -i :8080  # 查看 8080 端口
+lsof -i :8888  # 查看 8888 端口
+```
+
+**停止旧进程：**
+```bash
+./stop-services.sh
+# 或者
+pkill -f 'user.go'
+```
+
+### 8. PostgreSQL 连接失败怎么办？
+
+**检查数据库是否运行：**
+```bash
+pg_isready -h 127.0.0.1 -p 5432
+```
+
+**检查配置是否正确：**
+```yaml
+Postgres:
+  DataSource: postgres://用户名:密码@地址:端口/数据库?sslmode=disable
+```
+
+**常见错误：**
+- 用户名密码错误
+- 数据库不存在
+- PostgreSQL 没启动
 
 ---
 
-## 📄 License
+## 技术栈
 
-MIT
+- **框架：** go-zero
+- **数据库：** PostgreSQL
+- **ORM：** GORM
+- **RPC：** gRPC + Protobuf
+- **服务发现：** 直连模式（可选 etcd）
+
+---
+
+## 学习路径建议
+
+### 第一步：理解单体应用
+切换到 master 分支，理解最基础的 API → Logic → Model 流程。
+
+### 第二步：理解数据库迁移
+切换到 postgres 分支，理解如何从 MySQL 迁移到 PostgreSQL。
+
+### 第三步：理解微服务拆分
+回到当前分支，理解：
+- 为什么要拆分？
+- 怎么拆分？
+- RPC 调用的原理？
+
+### 第四步：实践服务发现
+尝试安装 etcd，把配置改为 etcd 模式，体验动态服务发现。
+
+### 第五步：多实例部署
+启动多个 user-rpc 实例（不同端口），看 etcd 如何实现负载均衡。
+
+---
+
+## 下一步可以做什么？
+
+1. **添加更多服务：** 比如订单服务 order-rpc，实现跨服务调用
+2. **添加中间件：** 认证、日志、限流、熔断
+3. **添加缓存：** Redis 缓存热点数据
+4. **添加消息队列：** Kafka 处理异步任务
+5. **容器化部署：** Docker + Docker Compose
+6. **监控告警：** Prometheus + Grafana
+7. **链路追踪：** Jaeger 追踪请求流转
+
+---
+
+## 核心总结
+
+### 微服务拆分的本质
+
+**不是为了拆分而拆分，而是为了解决问题：**
+- 单体太大，难以维护 → 拆成多个小服务
+- 流量太大，单机扛不住 → 独立扩展某个服务
+- 团队太大，协作困难 → 分模块开发
+
+### "多包了一层"的理解
+
+**之前：** Logic 直接调 Model（函数调用）
+**现在：** Logic 调 RPC（网络调用） → RPC 调 Model（函数调用）
+
+这一层带来了服务分离的能力，代价是增加了复杂度。
+
+### 服务发现的意义
+
+**直连：** 写死地址，简单但不灵活
+**etcd：** 动态发现，复杂但强大
+
+生产环境必须用服务发现，否则无法实现高可用和负载均衡。
+
+### 什么时候该微服务？
+
+**需要拆分：**
+- 代码太多（超过 1 万行）
+- 流量太大（单机 QPS 超过 1000）
+- 团队太大（超过 5 人）
+
+**不需要拆分：**
+- 小项目（几百行代码）
+- 流量小（几十 QPS）
+- 团队小（1-2 人）
+
+**核心原则：** 架构为业务服务，不是为了技术而技术。
+
+---
+
+## 致谢
+
+这个项目记录了从单体到微服务的完整演进过程，以及过程中遇到的真实问题和困惑。希望能帮助正在学习 go-zero 和微服务架构的你！
+
+如果有疑问，建议：
+1. 先看完整个 README
+2. 对照代码理解每个概念
+3. 动手实践，启动服务测试
+4. 遇到问题回到 FAQ 找答案
+
+**记住：** 理解比记忆更重要，实践比理论更有效。
+
+---
+
+🤖 本 README 根据实际开发过程中的对话整理而成，记录了所有的困惑点和解决方案。
